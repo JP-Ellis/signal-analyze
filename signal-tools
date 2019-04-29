@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Import/Export data from Signal's database and run analytics."""
+
+import base64
+import logging
+from pathlib import Path
+
+import click
+import coloredlogs
+import toml
+from termcolor import colored
+
+import analysis
+import db
+import settings
+import utilities
+
+LOGGER = logging.getLogger(__name__)
+
+
+def setup_logger(verbose: int):
+    """Configure the logger with the specified verbosity."""
+
+    # Adjust slightly the coloredlogs default.
+    log_fmt = "%(asctime)s %(name)s[%(process)d] %(levelname)s %(message)s"
+    field_styles = coloredlogs.DEFAULT_FIELD_STYLES
+    field_styles["levelname"] = {"bold": True}
+
+    coloredlogs.install(
+        level=max(10, 30 - verbose * 10), fmt=log_fmt, field_styles=field_styles
+    )
+
+    LOGGER.info(
+        "Logger verbosity set to: %s", logging.getLevelName(LOGGER.getEffectiveLevel())
+    )
+
+
+def parse_config_toml(config, toml_config):
+    """Parse the given TOML configuration file, updating the global configs."""
+    LOGGER.debug(f"Parsing config TOML: {toml_config.name}")
+    data = toml.load(toml_config)
+
+    for k, v in data.items():
+        if k in config:
+            LOGGER.debug(f"Updating config: {k} = {v}")
+            config[k] = v
+
+
+def sanitize_config(config: dict):
+    """Sanitize the global configuration."""
+    LOGGER.debug(f"Sanitizing global configuration.")
+    for k, f in settings.CONFIG_SANITIZER.items():
+        config[k] = f(config[k])
+
+
+@click.group()
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help="Increase the verbosity of the logs.  Can be specified multiple times.",
+)
+@click.option(
+    "-d",
+    "--signal-dir",
+    default=settings.CONFIG["signal_dir"],
+    type=click.Path(file_okay=False),
+    help="Signal configuration directory.",
+)
+@click.pass_context
+def main(ctx, verbose, signal_dir):
+    """Export and analyze chats from Signal Desktop."""
+    setup_logger(verbose)
+
+    config = settings.CONFIG
+
+    if signal_dir:
+        LOGGER.debug(f"Overwriting signal_dir with command line argument: {signal_dir}")
+        config["signal_dir"] = signal_dir
+
+    sanitize_config(config)
+
+    ctx.ensure_object(dict)
+    ctx.obj["config"] = config
+
+
+@main.command()
+@click.option(
+    "--show-id/--hide-id",
+    "show_id",
+    default=False,
+    help="Toggle the display conversation ID.  For group conversation, the ID is base64 encoded.",
+)
+@click.option(
+    "--show-message-count/--hide-message-count",
+    "show_message_count",
+    default=True,
+    help="Toggle the display of message counts.",
+)
+@click.pass_context
+def list_conversations(ctx, show_id, show_message_count):
+    """List all the conversations in Signal.
+    """
+    LOGGER.debug("Listing all conversations in the database.")
+
+    count = 0
+
+    if show_message_count:
+        messages = db.fetch_messages(ctx.obj["config"])
+
+    print(colored("Private conversations:", "white", attrs=["bold"]))
+    conversations = db.fetch_conversations(ctx.obj["config"], type="private")
+    for conv in conversations:
+        count += 1
+
+        output = []
+        output.append(colored("->", "blue"))
+        if show_id:
+            output.append(colored(conv["id"].decode("utf-8"), "green"))
+        output.append(
+            colored(conv["name"] if conv["name"] else conv["profile_name"], "white")
+        )
+        if show_message_count:
+            count = len([c for c in messages if c["conversation_id"] == conv["id"]])
+            output.append(colored(f"[{count} messages]"))
+
+        print(" ".join(output))
+
+    print("")
+    print(colored("Group conversations:", "white", attrs=["bold"]))
+    conversations = db.fetch_conversations(ctx.obj["config"], type="group")
+    for conv in conversations:
+        count += 1
+
+        output = []
+        output.append(colored("->", "blue"))
+        if show_id:
+            output.append(
+                colored(base64.b64encode(conv["id"]).decode("utf-8"), "green")
+            )
+        output.append(
+            colored(conv["name"] if conv["name"] else conv["profile_name"], "white")
+        )
+        output.append(f"({len(conv['members'])} members)")
+        if show_message_count:
+            count = len([c for c in messages if c["conversation_id"] == conv["id"]])
+            output.append(colored(f"[{count} messages]"))
+
+        print(" ".join(output))
+
+    print("")
+    print(colored(f"{count} conversations in total.", "green"))
+
+
+@main.command()
+@click.option(
+    "-f",
+    "--format",
+    type=click.Choice(["csv", "json"]),
+    default="csv",
+    help="Set the output format.",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    default="./export/",
+    type=click.Path(file_okay=False),
+    help="Set the export directory.",
+)
+@click.option(
+    "--attachments/--no-attachments",
+    "export_attachments",
+    default=False,
+    help="Toggle whether attachments are exported as well.",
+)
+@click.pass_context
+def export(ctx, format, output_dir, export_attachments):
+    """Export all conversations.
+    """
+    LOGGER.info("Export all conversations into '{output_dir}'.")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
+
+    messages = db.fetch_messages(ctx.obj["config"], as_dataframe=True)
+
+    for col in messages.columns:
+        LOGGER.debug(f"Column '{col}' type: {messages[col].dtype}")
+
+    conv_map = utilities.conversation_mapping(ctx.obj["config"])
+
+    for c_id, c_name in conv_map.items():
+        LOGGER.info(f"Exporting conversation '{c_name}'")
+        conv_dir = output_dir / c_name
+        conv_dir.mkdir(exist_ok=True)
+        if format == "csv":
+            messages[messages["conversation_id"] == c_id].to_csv(
+                conv_dir / "messages.csv", index=False
+            )
+        elif format == "json":
+            messages[messages["conversation_id"] == c_id].to_json(
+                conv_dir / "messages.json", orient="records"
+            )
+
+    if export_attachments:
+        utilities.export_attachments(ctx.obj["config"], messages)
+
+
+@main.command()
+@click.option(
+    "-o",
+    "--output-dir",
+    default="./analysis/",
+    type=click.Path(file_okay=False),
+    help="Set the output directory.",
+)
+@click.pass_context
+def analyse(ctx, output_dir):
+    messages = db.fetch_messages(ctx.obj["config"], as_dataframe=True)
+
+    # output_dir = Path(output_dir)
+    # output_dir.mkdir(exist_ok=True)
+
+    conv_map = utilities.conversation_mapping(ctx.obj["config"])
+    analysis.main(messages, conv_map)
+
+
+if __name__ == "__main__":
+    main()
