@@ -31,7 +31,7 @@ def setup_logger(verbose: int):
     )
 
     LOGGER.info(
-        "Logger verbosity set to: %s", logging.getLevelName(LOGGER.getEffectiveLevel())
+        f"Logger verbosity set to: {logging.getLevelName(LOGGER.getEffectiveLevel())}"
     )
 
 
@@ -89,7 +89,10 @@ def main(ctx, verbose, signal_dir):
     "--show-id/--hide-id",
     "show_id",
     default=False,
-    help="Toggle the display conversation ID.  For group conversation, the ID is base64 encoded.",
+    help=(
+        "Toggle the display conversation ID. For group conversation, the ID is"
+        "base64 encoded."
+    ),
 )
 @click.option(
     "--show-message-count/--hide-message-count",
@@ -156,7 +159,7 @@ def list_conversations(ctx, show_id, show_message_count):
 @click.option(
     "-f",
     "--format",
-    type=click.Choice(["csv", "json"]),
+    type=click.Choice(["csv", "sql", "json"]),
     default="csv",
     help="Set the output format.",
 )
@@ -174,13 +177,17 @@ def list_conversations(ctx, show_id, show_message_count):
     help="Toggle whether attachments are exported as well.",
 )
 @click.pass_context
-def export(ctx, format, output_dir, export_attachments):
+def export(ctx, fmt, output_dir, export_attachments):
     """Export all conversations.
     """
     LOGGER.info("Export all conversations into '{output_dir}'.")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
+
+    if fmt == "sql":
+        db.dump_messages(ctx.obj["config"], output_dir)
+        return
 
     messages = db.fetch_messages(ctx.obj["config"], as_dataframe=True)
 
@@ -193,11 +200,11 @@ def export(ctx, format, output_dir, export_attachments):
         LOGGER.info(f"Exporting conversation '{c_name}'")
         conv_dir = output_dir / c_name
         conv_dir.mkdir(exist_ok=True)
-        if format == "csv":
+        if fmt == "csv":
             messages[messages["conversation_id"] == c_id].to_csv(
                 conv_dir / "messages.csv", index=False
             )
-        elif format == "json":
+        elif fmt == "json":
             messages[messages["conversation_id"] == c_id].to_json(
                 conv_dir / "messages.json", orient="records"
             )
@@ -207,15 +214,16 @@ def export(ctx, format, output_dir, export_attachments):
 
 
 @main.command()
-@click.option(
-    "-o",
-    "--output-dir",
-    default="./analysis/",
-    type=click.Path(file_okay=False),
-    help="Set the output directory.",
-)
+# @click.option(
+#     "-o",
+#     "--output-dir",
+#     default="./analysis/",
+#     type=click.Path(file_okay=False),
+#     help="Set the output directory.",
+# )
 @click.pass_context
-def analyse(ctx, output_dir):
+def analyse(ctx):
+    """Analyse statistics from the conversations"""
     messages = db.fetch_messages(ctx.obj["config"], as_dataframe=True)
 
     # output_dir = Path(output_dir)
@@ -226,4 +234,4 @@ def analyse(ctx, output_dir):
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter

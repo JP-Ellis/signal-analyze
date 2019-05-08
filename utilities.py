@@ -53,7 +53,7 @@ def export_attachments(config, messages):
         js = msg["json"]
         for attachment in js["attachments"]:
             if "path" not in attachment:
-                LOGGER.warn(f"{msg['id']}: Attachment does not specified a path")
+                LOGGER.warning(f"{msg['id']}: Attachment does not specified a path")
                 continue
 
             ext = attachment["contentType"].lower().split("/")[-1]

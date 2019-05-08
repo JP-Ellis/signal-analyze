@@ -3,13 +3,12 @@
 import logging
 from datetime import timedelta
 
-import numpy as np
-import pandas as pd
-
 import dash
 import dash_core_components as dcc
 import dash_html_components as html
 import emoji
+import numpy as np
+import pandas as pd
 import plotly.graph_objs as go
 
 # import plotly.plotly as py
@@ -46,6 +45,7 @@ def main(messages, conv_map):
 
 
 def process_messages(messages, conv_map):
+    """Processes the messages and perform so initial calculations on the bulk."""
     messages = messages.copy()
     messages["words"] = messages["body"].apply(lambda x: len(x.split()) if x else 0)
     messages["dayofweek"] = messages["sent_at"].apply(lambda t: t.weekday())
@@ -277,5 +277,5 @@ def emoji_use(messages, conv_map):
 
     layout = {"title": "Emojis Used", "bargap": 0.2, "bargroupgap": 0.0}
 
-    figure = dict(data=data)
+    figure = dict(data=data, layout=layout)
     return dcc.Graph(id="emoji-use", figure=figure)

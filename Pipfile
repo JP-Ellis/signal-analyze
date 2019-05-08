@@ -4,18 +4,18 @@ url = "https://pypi.org/simple"
 verify_ssl = true
 
 [dev-packages]
-python-language-server = {extras = ["all"],version = "*"}
+python-language-server = {extras = ["all"], version = "*"}
 
 [packages]
-toml = "*"
-coloredlogs = "*"
-pysqlcipher3 = "*"
 click = "*"
-termcolor = "*"
-pandas = "*"
+coloredlogs = "*"
 dash = "*"
 dash-daq = "*"
 emoji = "*"
+pandas = "*"
+pysqlcipher3 = "*"
+termcolor = "*"
+toml = "*"
 
 [requires]
 python_version = "3.7"

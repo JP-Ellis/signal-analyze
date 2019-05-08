@@ -2,6 +2,7 @@
 
 import json
 import logging
+import subprocess
 from datetime import datetime
 
 import pandas as pd
@@ -44,16 +45,16 @@ def fetch(config, cmd):
         conn.close()
 
 
-def fetch_conversations(config, type=None):
+def fetch_conversations(config, conv_type=None):
     """Fetch all the conversations from the database.
 
     The `type` can be either `"private"` or `"group"` for private and group
     conversations.  If left as `None`, all conversations are returned.
 
     """
-    if type is None:
+    if conv_type is None:
         type_selection = ""
-    elif type in ["private", "group"]:
+    elif conv_type in ["private", "group"]:
         type_selection = f'WHERE type = "{type}"'
     else:
         raise ValueError(f"Unknown conversation type '{type}'")
@@ -76,9 +77,11 @@ def fetch_conversations(config, type=None):
 def fetch_messages(config, with_attachments=None, as_dataframe=True):
     """Fetch all the messages from the database.
 
-    If `with_attachments` is not None, then only those messages with attachments will be returned.
+    If `with_attachments` is not None, then only those messages with
+    attachments will be returned.
 
-    If `as_dataframe` is True, the data will be loaded and processed into a Pandas DataFrame
+    If `as_dataframe` is True, the data will be loaded and processed into a
+    Pandas DataFrame
     """
     cond = []
     if not config["include_expiring"]:
@@ -116,3 +119,28 @@ def fetch_messages(config, with_attachments=None, as_dataframe=True):
     rows["json"] = rows["json"].apply(utilities.parse_message_json)
 
     return rows
+
+
+def dump_messages(config, output_dir):
+    """Connect to the Signal database and return a cursor."""
+
+    tables = [
+        "conversations",
+        "messages",
+        "messages_fts",
+        "messages_fts_config",
+        "messages_fts_content",
+        "messages_fts_data",
+        "messages_fts_docsize",
+        "messages_fts_idx",
+    ]
+
+    sql = f"PRAGMA key=\"x'{get_key(config)}'\";\n"
+    for setting, value in settings.SQLCIPHER_SETTINGS.items():
+        sql += f"PRAGMA {setting}={value};\n"
+    sql += f".out {output_dir / 'messages.sql'};\n"
+    sql += ".headers on;\n"
+    sql += f".dump {' '.join(tables)};\n"
+    print(sql)
+
+    subprocess.run(["sqlite3", config["signal_dir"] / "sql" / "db.sqlite", sql])
