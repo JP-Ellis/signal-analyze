@@ -14,9 +14,15 @@ LOGGER = logging.getLogger(__name__)
 def conversation_mapping(config):
     """Map the conversation ID to the name."""
     conversations = db.fetch_conversations(config)
-    return {
-        c["id"]: c["name"] if c["name"] else c["profile_name"] for c in conversations
-    }
+    mapping = {}
+    for c in conversations:
+        if "profile_name" in c and c["profile_name"]:
+            mapping[c["id"]] = c["profile_name"]
+        elif c["name"]:
+            mapping[c["id"]] = c["name"]
+        else:
+            mapping[c["id"]] = c["id"].decode("UTF-8")
+    return mapping
 
 
 def parse_message_json(s):

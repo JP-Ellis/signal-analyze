@@ -3,6 +3,8 @@
 
 import base64
 import logging
+import os
+import pickle
 from pathlib import Path
 
 import click
@@ -10,7 +12,6 @@ import coloredlogs
 import toml
 from termcolor import colored
 
-import analysis
 import db
 import settings
 import utilities
@@ -214,23 +215,22 @@ def export(ctx, fmt, output_dir, export_attachments):
 
 
 @main.command()
-# @click.option(
-#     "-o",
-#     "--output-dir",
-#     default="./analysis/",
-#     type=click.Path(file_okay=False),
-#     help="Set the output directory.",
-# )
 @click.pass_context
-def analyse(ctx):
+def stats(ctx):
     """Analyse statistics from the conversations"""
-    messages = db.fetch_messages(ctx.obj["config"], as_dataframe=True)
+    try:
+        LOGGER.debug("Pickling configuration")
+        with open(".config.pkl", "wb") as f:
+            pickle.dump(ctx.obj["config"], f)
 
-    # output_dir = Path(output_dir)
-    # output_dir.mkdir(exist_ok=True)
+        import stats as stats_module
 
-    conv_map = utilities.conversation_mapping(ctx.obj["config"])
-    analysis.main(messages, conv_map)
+        stats_module.main()
+    finally:
+        try:
+            os.remove(".config.pkl")
+        except FileNotFoundError:
+            pass
 
 
 if __name__ == "__main__":
