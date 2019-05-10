@@ -113,7 +113,7 @@ def list_conversations(ctx, show_id, show_message_count):
         messages = db.fetch_messages(ctx.obj["config"])
 
     print(colored("Private conversations:", "white", attrs=["bold"]))
-    conversations = db.fetch_conversations(ctx.obj["config"], type="private")
+    conversations = db.fetch_conversations(ctx.obj["config"], conv_type="private")
     for conv in conversations:
         count += 1
 
@@ -132,7 +132,7 @@ def list_conversations(ctx, show_id, show_message_count):
 
     print("")
     print(colored("Group conversations:", "white", attrs=["bold"]))
-    conversations = db.fetch_conversations(ctx.obj["config"], type="group")
+    conversations = db.fetch_conversations(ctx.obj["config"], conv_type="group")
     for conv in conversations:
         count += 1
 
