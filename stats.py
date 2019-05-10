@@ -70,6 +70,43 @@ APP.layout = html.Div(
                     ],
                     className="timeline",
                 ),
+                # Histogram
+                html.Div(
+                    [
+                        html.H2("Histogram"),
+                        html.Div(
+                            [
+                                dcc.Dropdown(
+                                    id="histogram-reduction",
+                                    options=[
+                                        {
+                                            "label": "Day of Week",
+                                            "value": "day_of_week",
+                                        },
+                                        {
+                                            "label": "Time of Day",
+                                            "value": "time_of_day",
+                                        },
+                                    ],
+                                    value="time_of_day",
+                                    clearable=False,
+                                ),
+                                dcc.Dropdown(
+                                    id="histogram-value",
+                                    options=[
+                                        {"label": "Messages", "value": "messages"},
+                                        {"label": "Words", "value": "words"},
+                                        {"label": "Characters", "value": "characters"},
+                                    ],
+                                    value="messages",
+                                    clearable=False,
+                                ),
+                            ]
+                        ),
+                        dcc.Loading(dcc.Graph(id="histogram-figure")),
+                    ],
+                    className="histogram",
+                ),
             ],
             className="content",
         ),
@@ -134,6 +171,71 @@ def timeline(value, conversation):
         ),
         go.Histogram(
             x=outgoing["sent_at"], y=outgoing[value], name="Sent", **hist_options
+        ),
+    ]
+
+    if incoming.size < outgoing.size:
+        data.reverse()
+
+    return dict(data=data, layout=layout)
+
+
+@APP.callback(
+    Output("histogram-figure", "figure"),
+    [
+        Input("histogram-value", "value"),
+        Input("histogram-reduction", "value"),
+        Input("conversation", "value"),
+    ],
+)
+def histogram(value, reduction, conversation):
+    """Create a histogram of the conversation, reducing the data as per the
+    reduction."""
+
+    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages["messages"] = messages["body"].apply(lambda x: 1 if x else 0)
+    messages["words"] = messages["body"].apply(lambda x: len(x.split()) if x else 0)
+    messages["characters"] = messages["body"].apply(lambda x: len(x) if x else 0)
+    messages["time_of_day"] = messages["sent_at"].apply(
+        lambda t: t.hour + t.minute / 60 + t.second / 60 / 60
+    )
+    messages["day_of_week"] = messages["sent_at"].apply(lambda t: t.weekday())
+    messages.sort_values(by=reduction, inplace=True)
+
+    incoming, outgoing = split_messages(messages, conversation)
+
+    hist_options = {"opacity": 0.5}
+    layout = {"bargap": 0.2, "bargroupgap": 0.0}
+
+    if reduction == "day_of_week":
+        print(messages[value].unique())
+        hist_options["nbinsx"] = 7
+        # hist_options["xbins"] = {"size": 1}
+        layout["xaxis"] = {
+            "type": "category",
+            "tickmode": "array",
+            "tickvals": [0, 1, 2, 3, 4, 5, 6],
+            "ticktext": [
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+                "Sunday",
+            ],
+        }
+    elif reduction == "time_of_day":
+        hist_options["nbinsx"] = 24
+        # hist_options["xbins"] = {"size": 1}
+        layout["xaxis"] = {"tick0": 0, "dtick": 1}
+
+    data = [
+        go.Histogram(
+            x=incoming[reduction], y=incoming[value], name="Received", **hist_options
+        ),
+        go.Histogram(
+            x=outgoing[reduction], y=outgoing[value], name="Sent", **hist_options
         ),
     ]
 
