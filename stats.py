@@ -22,7 +22,6 @@ EMOJI_SET = set(emoji.UNICODE_EMOJI)
 
 LOGGER.debug("Unpickling configuration")
 CONFIG = pickle.load(open(".config.pkl", "rb"))
-MESSAGES = db.fetch_messages(CONFIG, as_dataframe=True)
 CONVS = utilities.conversation_mapping(CONFIG)
 
 APP = dash.Dash("signal-statistics")
@@ -54,21 +53,23 @@ APP.layout = html.Div(
         # Content
         html.Div(
             [
+                # Timeline
                 html.Div(
                     [
+                        html.H2("Conversation Timeline"),
                         dcc.Tabs(
                             [
-                                dcc.Tab(label="Messages per Day", value="messages"),
-                                dcc.Tab(label="Words per Day", value="words"),
-                                dcc.Tab(label="Characters per Day", value="characters"),
+                                dcc.Tab(label="Messages", value="messages"),
+                                dcc.Tab(label="Words", value="words"),
+                                dcc.Tab(label="Characters", value="characters"),
                             ],
-                            id="day-histogram-value",
+                            id="timeline-value",
                             value="messages",
                         ),
-                        dcc.Loading(dcc.Graph(id="day-histogram-figure")),
+                        dcc.Loading(dcc.Graph(id="timeline-figure")),
                     ],
-                    className="day-histogram",
-                )
+                    className="timeline",
+                ),
             ],
             className="content",
         ),
@@ -76,12 +77,9 @@ APP.layout = html.Div(
 )
 
 
-def split_messages(conversation, messages=None):
+def split_messages(messages, conversation):
     """Select those messages which belong to the selected conversation and split
     them into incoming and outgoing messages."""
-    if not messages:
-        messages = MESSAGES.copy()
-
     if conversation:
         messages = messages[messages["conversation_id"] == conversation.encode("UTF-8")]
 
@@ -89,35 +87,21 @@ def split_messages(conversation, messages=None):
 
 
 @APP.callback(
-    Output("day-histogram-figure", "figure"),
-    [Input("day-histogram-value", "value"), Input("conversation", "value")],
+    Output("timeline-figure", "figure"),
+    [Input("timeline-value", "value"), Input("conversation", "value")],
 )
-def day_histogram(value, conversation):
-    """Create a histogram binning messages per day"""
+def timeline(value, conversation):
+    """Create a timeline of the timeline showing how much activity there was on
+    each day."""
 
-    incoming, outgoing = split_messages(conversation)
+    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages["messages"] = messages["body"].apply(lambda x: 1 if x else 0)
+    messages["words"] = messages["body"].apply(lambda x: len(x.split()) if x else 0)
+    messages["characters"] = messages["body"].apply(lambda x: len(x) if x else 0)
 
-    incoming["messages"] = incoming["body"].apply(lambda x: 1 if x else 0)
-    incoming["words"] = incoming["body"].apply(lambda x: len(x.split()) if x else 0)
-    incoming["characters"] = incoming["body"].apply(lambda x: len(x) if x else 0)
-    outgoing["messages"] = outgoing["body"].apply(lambda x: 1 if x else 0)
-    outgoing["words"] = outgoing["body"].apply(lambda x: len(x.split()) if x else 0)
-    outgoing["characters"] = outgoing["body"].apply(lambda x: len(x) if x else 0)
+    incoming, outgoing = split_messages(messages, conversation)
 
     hist_options = {"xbins": {"size": "1D"}, "histfunc": "sum", "opacity": 0.5}
-
-    data = [
-        go.Histogram(
-            x=incoming["sent_at"], y=incoming[value], name="Received", **hist_options
-        ),
-        go.Histogram(
-            x=outgoing["sent_at"], y=outgoing[value], name="Sent", **hist_options
-        ),
-    ]
-
-    if incoming.size < outgoing.size:
-        data.reverse()
-
     layout = {
         "xaxis": {
             "name": "Date",
@@ -144,10 +128,23 @@ def day_histogram(value, conversation):
         "barmode": "overlay",
     }
 
+    data = [
+        go.Histogram(
+            x=incoming["sent_at"], y=incoming[value], name="Received", **hist_options
+        ),
+        go.Histogram(
+            x=outgoing["sent_at"], y=outgoing[value], name="Sent", **hist_options
+        ),
+    ]
+
+    if incoming.size < outgoing.size:
+        data.reverse()
+
     return dict(data=data, layout=layout)
 
 
 def main():
+    """Start the plot.ly server"""
     LOGGER.info("Starting plot.ly server")
 
     APP.run_server(debug=True)
