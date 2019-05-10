@@ -107,6 +107,23 @@ APP.layout = html.Div(
                     ],
                     className="histogram",
                 ),
+                # Emoji
+                html.Div(
+                    [
+                        html.H2("Emoji Use"),
+                        dcc.Loading(dcc.Graph(id="emoji-figure")),
+                        dcc.Slider(
+                            id="emoji-threshold",
+                            min=0,
+                            max=100,
+                            step=5,
+                            value=10,
+                            dots=True,
+                            marks={v: f"{v}" for v in range(0, 100 + 1, 10)},
+                        ),
+                    ],
+                    className="emoji",
+                ),
             ],
             className="content",
         ),
@@ -237,6 +254,48 @@ def histogram(value, reduction, conversation):
         go.Histogram(
             x=outgoing[reduction], y=outgoing[value], name="Sent", **hist_options
         ),
+    ]
+
+    if incoming.size < outgoing.size:
+        data.reverse()
+
+    return dict(data=data, layout=layout)
+
+
+@APP.callback(
+    Output("emoji-figure", "figure"),
+    [Input("emoji-threshold", "value"), Input("conversation", "value")],
+)
+def emoji_use(threshold, conversation):
+    """Create a histogram of the conversation, reducing the data as per the
+    reduction."""
+
+    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages["emoji"] = (
+        messages["body"]
+        .apply(lambda txt: txt if txt else "")
+        .apply(lambda txt: [l for l in txt if l in EMOJI_SET])
+    )
+
+    incoming, outgoing = split_messages(messages, conversation)
+    values, counts = np.unique(incoming["emoji"].sum(), return_counts=True)
+    in_emojis = pd.Series(index=values, data=counts)
+    values, counts = np.unique(outgoing["emoji"].sum(), return_counts=True)
+    out_emojis = pd.Series(index=values, data=counts)
+
+    data = pd.concat(
+        {"incoming": in_emojis, "outgoing": out_emojis}, axis=1, sort=False
+    ).fillna(0)
+    data["total"] = data["incoming"] + data["outgoing"]
+    data.sort_values(by="total", inplace=True, ascending=False)
+    data = data.query(f"total >= {threshold}")
+
+    hist_options = {"opacity": 0.5}
+    layout = {"bargap": 0.2, "bargroupgap": 0.0}
+
+    data = [
+        go.Bar(x=data.index, y=data["incoming"], name="Received", **hist_options),
+        go.Bar(x=data.index, y=data["outgoing"], name="Sent", **hist_options),
     ]
 
     if incoming.size < outgoing.size:
