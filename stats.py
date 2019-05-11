@@ -124,6 +124,23 @@ APP.layout = html.Div(
                     ],
                     className="emoji",
                 ),
+                # Conversation starter
+                html.Div(
+                    [
+                        html.H2("Conversation starter"),
+                        dcc.Loading(dcc.Graph(id="conversation-starter-figure")),
+                        dcc.Slider(
+                            id="conversation-starter-threshold",
+                            min=0,
+                            max=6,
+                            step=0.5,
+                            value=2,
+                            dots=True,
+                            marks={v: f"{v}h" for v in range(0, 6 + 1, 1)},
+                        ),
+                    ],
+                    className="conversation-starter",
+                ),
             ],
             className="content",
         ),
@@ -131,11 +148,18 @@ APP.layout = html.Div(
 )
 
 
+def select_conversation(messages, conversation):
+    """Select those messages which belong to the selected conversation."""
+    if conversation:
+        messages = messages[messages["conversation_id"] == conversation.encode("UTF-8")]
+
+    return messages
+
+
 def split_messages(messages, conversation):
     """Select those messages which belong to the selected conversation and split
     them into incoming and outgoing messages."""
-    if conversation:
-        messages = messages[messages["conversation_id"] == conversation.encode("UTF-8")]
+    messages = select_conversation(messages, conversation)
 
     return (messages.query("type == 'incoming'"), messages.query("type == 'outgoing'"))
 
@@ -300,6 +324,56 @@ def emoji_use(threshold, conversation):
 
     if incoming.size < outgoing.size:
         data.reverse()
+
+    return dict(data=data, layout=layout)
+
+
+@APP.callback(
+    Output("conversation-starter-figure", "figure"),
+    [Input("conversation-starter-threshold", "value"), Input("conversation", "value")],
+)
+def conversation_starter(threshold, conversation):
+    """Create a pie chart of who initiates conversations"""
+    if conversation:
+        conversation_label = CONVS[conversation.encode("UTF-8")]
+    else:
+        conversation_label = "Others"
+
+    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages = select_conversation(messages, conversation)
+
+    threshold = timedelta(seconds=threshold * 3600)
+    conversations = [
+        {
+            "starter": messages.iloc[0]["type"],
+            "start": messages.iloc[0]["sent_at"],
+            "last": messages.iloc[0]["sent_at"],
+        }
+    ]
+    for _, msg in messages.iterrows():
+        if msg["sent_at"] - conversations[-1]["last"] < threshold:
+            conversations[-1]["last"] = msg["sent_at"]
+        else:
+            conversations.append(
+                {
+                    "starter": msg["type"],
+                    "start": msg["sent_at"],
+                    "last": msg["sent_at"],
+                }
+            )
+    conversations = pd.DataFrame(conversations)
+    conversations["length"] = conversations["last"] - conversations["start"]
+
+    data = conversations["starter"].value_counts().to_frame()
+    data.index = data.index.map({"outgoing": "Me", "incoming": conversation_label})
+    data["msg_count"] = 0
+    for idx in data.index:
+        data.loc[idx, "msg_count"] = len(messages.query(f"type == '{idx}'").index)
+    data.sort_values(by="msg_count", inplace=True)
+
+    layout = {}
+
+    data = [go.Pie(labels=data.index, values=data["starter"])]
 
     return dict(data=data, layout=layout)
 
