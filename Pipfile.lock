@@ -68,10 +68,10 @@
         },
         "dash-daq": {
             "hashes": [
-                "sha256:99e600bead97a8cce43cf759db3eac75af09952e6427f53b51d490d5f8767ff9"
+                "sha256:33851d22e46f73610c8e59d50442edacaf1993d457c45f5841b2707e6a1c928c"
             ],
             "index": "pypi",
-            "version": "==0.1.4"
+            "version": "==0.1.5"
         },
         "dash-html-components": {
             "hashes": [
