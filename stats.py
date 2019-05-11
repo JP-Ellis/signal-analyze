@@ -2,6 +2,7 @@
 
 import logging
 import pickle
+import time
 from datetime import timedelta
 
 import dash
@@ -22,6 +23,8 @@ EMOJI_SET = set(emoji.UNICODE_EMOJI)
 
 LOGGER.debug("Unpickling configuration")
 CONFIG = pickle.load(open(".config.pkl", "rb"))
+LAST_UPDATE = time.time()
+MESSAGES = db.fetch_messages(CONFIG, as_dataframe=True)
 CONVS = utilities.conversation_mapping(CONFIG)
 
 APP = dash.Dash("signal-statistics")
@@ -148,6 +151,21 @@ APP.layout = html.Div(
 )
 
 
+def load_messages():
+    """Load the messages, possibly updating the global variable if needed."""
+    global LAST_UPDATE
+    global MESSAGES
+
+    if MESSAGES is None or time.time() - LAST_UPDATE > 60:
+        LOGGER.info("Updating messages...")
+        LAST_UPDATE = time.time()
+        MESSAGES = db.fetch_messages(CONFIG, as_dataframe=True)
+    else:
+        LOGGER.debug("Using pre-fetched messages.")
+
+    return MESSAGES.copy()
+
+
 def select_conversation(messages, conversation):
     """Select those messages which belong to the selected conversation."""
     if conversation:
@@ -164,6 +182,25 @@ def split_messages(messages, conversation):
     return (messages.query("type == 'incoming'"), messages.query("type == 'outgoing'"))
 
 
+def filter_timeline(messages, timeline_data):
+    """Filter messages selecting only those messages in the timeline's range."""
+    if timeline_data is None:
+        return messages
+
+    if "xaxis.range" in timeline_data:
+        start, end = timeline_data["xaxis.range"]
+    elif "xaxis.range[0]" in timeline_data:
+        start = timeline_data["xaxis.range[0]"]
+        end = timeline_data["xaxis.range[1]"]
+    else:
+        return messages
+
+    start = pd.to_datetime(start)
+    end = pd.to_datetime(end)
+    messages = messages[(start < messages["sent_at"]) & (messages["sent_at"] < end)]
+    return messages
+
+
 @APP.callback(
     Output("timeline-figure", "figure"),
     [Input("timeline-value", "value"), Input("conversation", "value")],
@@ -172,7 +209,7 @@ def timeline(value, conversation):
     """Create a timeline of the timeline showing how much activity there was on
     each day."""
 
-    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages = load_messages()
     messages["messages"] = messages["body"].apply(lambda x: 1 if x else 0)
     messages["words"] = messages["body"].apply(lambda x: len(x.split()) if x else 0)
     messages["characters"] = messages["body"].apply(lambda x: len(x) if x else 0)
@@ -227,13 +264,16 @@ def timeline(value, conversation):
         Input("histogram-value", "value"),
         Input("histogram-reduction", "value"),
         Input("conversation", "value"),
+        Input("timeline-figure", "relayoutData"),
     ],
 )
-def histogram(value, reduction, conversation):
+def histogram(value, reduction, conversation, timeline_data):
     """Create a histogram of the conversation, reducing the data as per the
     reduction."""
 
-    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages = load_messages()
+    messages = filter_timeline(messages, timeline_data)
+
     messages["messages"] = messages["body"].apply(lambda x: 1 if x else 0)
     messages["words"] = messages["body"].apply(lambda x: len(x.split()) if x else 0)
     messages["characters"] = messages["body"].apply(lambda x: len(x) if x else 0)
@@ -288,13 +328,19 @@ def histogram(value, reduction, conversation):
 
 @APP.callback(
     Output("emoji-figure", "figure"),
-    [Input("emoji-threshold", "value"), Input("conversation", "value")],
+    [
+        Input("emoji-threshold", "value"),
+        Input("conversation", "value"),
+        Input("timeline-figure", "relayoutData"),
+    ],
 )
-def emoji_use(threshold, conversation):
+def emoji_use(threshold, conversation, timeline_data):
     """Create a histogram of the conversation, reducing the data as per the
     reduction."""
 
-    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages = load_messages()
+    messages = filter_timeline(messages, timeline_data)
+
     messages["emoji"] = (
         messages["body"]
         .apply(lambda txt: txt if txt else "")
@@ -330,16 +376,21 @@ def emoji_use(threshold, conversation):
 
 @APP.callback(
     Output("conversation-starter-figure", "figure"),
-    [Input("conversation-starter-threshold", "value"), Input("conversation", "value")],
+    [
+        Input("conversation-starter-threshold", "value"),
+        Input("conversation", "value"),
+        Input("timeline-figure", "relayoutData"),
+    ],
 )
-def conversation_starter(threshold, conversation):
+def conversation_starter(threshold, conversation, timeline_data):
     """Create a pie chart of who initiates conversations"""
     if conversation:
         conversation_label = CONVS[conversation.encode("UTF-8")]
     else:
         conversation_label = "Others"
 
-    messages = db.fetch_messages(CONFIG, as_dataframe=True)
+    messages = load_messages()
+    messages = filter_timeline(messages, timeline_data)
     messages = select_conversation(messages, conversation)
 
     threshold = timedelta(seconds=threshold * 3600)
