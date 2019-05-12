@@ -82,7 +82,7 @@ def main(ctx, verbose, signal_dir):
     sanitize_config(config)
 
     ctx.ensure_object(dict)
-    ctx.obj["debug"] = verbose >= 2
+    ctx.obj["debug"] = verbose >= 3
     ctx.obj["config"] = config
 
 
