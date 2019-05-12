@@ -1,7 +1,9 @@
 """Analysis of the data"""
 
+import itertools
 import logging
 import pickle
+import re
 import time
 from datetime import timedelta
 
@@ -126,6 +128,32 @@ APP.layout = html.Div(
                         ),
                     ],
                     className="emoji",
+                ),
+                # n-grams
+                html.Div(
+                    [
+                        html.H2("N-grams"),
+                        dcc.Slider(
+                            id="ngrams-words",
+                            min=1,
+                            max=10,
+                            step=1,
+                            value=2,
+                            dots=True,
+                            marks={v: f"{v}" for v in range(1, 11, 1)},
+                        ),
+                        dcc.Loading(dcc.Graph(id="ngrams-figure")),
+                        dcc.Slider(
+                            id="ngrams-threshold",
+                            min=0,
+                            max=100,
+                            step=5,
+                            value=10,
+                            dots=True,
+                            marks={v: f"{v}" for v in range(0, 100 + 1, 10)},
+                        ),
+                    ],
+                    className="ngrams",
                 ),
                 # Conversation starter
                 html.Div(
@@ -355,6 +383,72 @@ def emoji_use(threshold, conversation, timeline_data):
 
     data = pd.concat(
         {"incoming": in_emojis, "outgoing": out_emojis}, axis=1, sort=False
+    ).fillna(0)
+    data["total"] = data["incoming"] + data["outgoing"]
+    data.sort_values(by="total", inplace=True, ascending=False)
+    data = data.query(f"total >= {threshold}")
+
+    hist_options = {"opacity": 0.5}
+    layout = {"bargap": 0.2, "bargroupgap": 0.0}
+
+    data = [
+        go.Bar(x=data.index, y=data["incoming"], name="Received", **hist_options),
+        go.Bar(x=data.index, y=data["outgoing"], name="Sent", **hist_options),
+    ]
+
+    if incoming.size < outgoing.size:
+        data.reverse()
+
+    return dict(data=data, layout=layout)
+
+
+@APP.callback(
+    Output("ngrams-figure", "figure"),
+    [
+        Input("ngrams-words", "value"),
+        Input("ngrams-threshold", "value"),
+        Input("conversation", "value"),
+        Input("timeline-figure", "relayoutData"),
+    ],
+)
+def ngrams(n, threshold, conversation, timeline_data):
+    """Create a histogram of the conversation, reducing the data as per the
+    reduction."""
+
+    messages = load_messages()
+    messages = filter_timeline(messages, timeline_data)
+
+    punct = re.compile("[.,;:!?]")
+
+    messages["ngrams"] = (
+        messages["body"]
+        # Lowercase everything
+        .apply(lambda x: x.lower() if x else "")
+        # Replace ’ with '
+        .apply(lambda x: x.replace("’", "'"))
+        # split at punctuation (ngrams don't cross a full stop)
+        .apply(punct.split)
+        # split each segment now based on whitespace
+        .apply(lambda x: [s.split() for s in x])
+        # take all n-contiguous subsets of each split segment, and join them
+        # with a whitespace
+        .apply(
+            lambda x: [
+                [" ".join(s[i : i + n]) for i in range(len(s) - n + 1)] for s in x
+            ]
+        )
+        # flatten the array
+        .apply(lambda x: list(itertools.chain(*x)))
+    )
+
+    incoming, outgoing = split_messages(messages, conversation)
+    values, counts = np.unique(incoming["ngrams"].sum(), return_counts=True)
+    in_grams = pd.Series(index=values, data=counts)
+    values, counts = np.unique(outgoing["ngrams"].sum(), return_counts=True)
+    out_grams = pd.Series(index=values, data=counts)
+
+    data = pd.concat(
+        {"incoming": in_grams, "outgoing": out_grams}, axis=1, sort=False
     ).fillna(0)
     data["total"] = data["incoming"] + data["outgoing"]
     data.sort_values(by="total", inplace=True, ascending=False)
