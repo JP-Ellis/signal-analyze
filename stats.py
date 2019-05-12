@@ -429,8 +429,8 @@ def conversation_starter(threshold, conversation, timeline_data):
     return dict(data=data, layout=layout)
 
 
-def main():
+def main(debug):
     """Start the plot.ly server"""
     LOGGER.info("Starting plot.ly server")
 
-    APP.run_server(debug=True)
+    APP.run_server(debug=debug)

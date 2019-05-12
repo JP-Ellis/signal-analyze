@@ -82,6 +82,7 @@ def main(ctx, verbose, signal_dir):
     sanitize_config(config)
 
     ctx.ensure_object(dict)
+    ctx.obj["debug"] = verbose >= 2
     ctx.obj["config"] = config
 
 
@@ -225,7 +226,7 @@ def stats(ctx):
 
         import stats as stats_module
 
-        stats_module.main()
+        stats_module.main(ctx.obj["debug"])
     finally:
         try:
             os.remove(".config.pkl")
